@@ -1,0 +1,230 @@
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+// Replace with your deployed contract addresses
+const DEPLOYER_ADDRESS = "0x..."; // Deployer contract
+const TOKEN_ADDRESS = "0x..."; // Token contract
+const AIRDROP_ADDRESS = "0x..."; // Airdrop contract
+
+export default function WeLoveDApp() {
+  const [account, setAccount] = useState(null);
+  const [provider, setProvider] = useState(null);
+  const [tokenSymbol, setTokenSymbol] = useState("WELO");
+  const [balance, setBalance] = useState("0");
+  const [proofsData, setProofsData] = useState(null);
+  const [eligibleInfo, setEligibleInfo] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+
+  // Connect to MetaMask
+  const connectWallet = async () => {
+    if (window.ethereum) {
+      try {
+        const prov = new ethers.BrowserProvider(window.ethereum);
+        const accounts = await prov.send("eth_requestAccounts", []);
+        setAccount(accounts[0]);
+        setProvider(prov);
+      } catch (err) {
+        console.error("Wallet connection failed", err);
+      }
+    } else {
+      alert("MetaMask not found!");
+    }
+  };
+
+  // Fetch token balance
+  const fetchBalance = async () => {
+    if (!provider || !account) return;
+    const abi = [
+      "function balanceOf(address) view returns (uint256)",
+      "function symbol() view returns (string)"
+    ];
+    const token = new ethers.Contract(TOKEN_ADDRESS, abi, provider);
+    const bal = await token.balanceOf(account);
+    const sym = await token.symbol();
+    setTokenSymbol(sym);
+    setBalance(ethers.formatUnits(bal, 18));
+  };
+
+  // Handle proofs.json upload
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        setProofsData(data);
+        if (account && data[account.toLowerCase()]) {
+          setEligibleInfo(data[account.toLowerCase()]);
+        } else {
+          setEligibleInfo(null);
+        }
+      } catch (err) {
+        console.error("Invalid JSON", err);
+        alert("Invalid proofs.json file");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Claim airdrop
+  const claimAirdrop = async () => {
+    if (!provider || !account || !eligibleInfo) return;
+    const signer = await provider.getSigner();
+    const abi = [
+      "function claim(uint256 amount, bytes32[] calldata proof) external"
+    ];
+    const airdrop = new ethers.Contract(AIRDROP_ADDRESS, abi, signer);
+
+    try {
+      const tx = await airdrop.claim(
+        ethers.parseUnits(eligibleInfo.amount, 18),
+        eligibleInfo.proof
+      );
+      await tx.wait();
+      alert("Airdrop claimed!");
+      fetchBalance();
+    } catch (err) {
+      console.error("Claim failed", err);
+      alert("Claim failed: check proof or eligibility");
+    }
+  };
+
+  // Pagination helpers
+  const whitelistEntries = proofsData ? Object.entries(proofsData) : [];
+  const totalPages = Math.ceil(whitelistEntries.length / rowsPerPage);
+  const paginatedEntries = whitelistEntries.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
+
+  useEffect(() => {
+    fetchBalance();
+  }, [account, provider]);
+
+  useEffect(() => {
+    if (proofsData && account) {
+      if (proofsData[account.toLowerCase()]) {
+        setEligibleInfo(proofsData[account.toLowerCase()]);
+      } else {
+        setEligibleInfo(null);
+      }
+    }
+  }, [account, proofsData]);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 to-red-200 p-6 flex flex-col items-center">
+      <h1 className="text-4xl font-bold mb-4">❤️ WeLove Token DApp</h1>
+
+      {!account ? (
+        <Button onClick={connectWallet} className="mb-4">
+          Connect Wallet
+        </Button>
+      ) : (
+        <Card className="w-full max-w-md shadow-xl mb-6">
+          <CardContent className="p-6 flex flex-col items-center">
+            <p className="text-lg mb-2">Connected: {account}</p>
+            <p className="text-lg mb-2">
+              Balance: <span className="font-bold">{balance}</span> {tokenSymbol}
+            </p>
+
+            <Button onClick={fetchBalance} className="mt-2 mb-2">
+              Refresh Balance
+            </Button>
+
+            <input type="file" accept="application/json" onChange={handleFileUpload} className="mt-4" />
+
+            {eligibleInfo ? (
+              <>
+                <p className="mt-4 text-green-700 font-semibold">
+                  Eligible for {eligibleInfo.amount} {tokenSymbol}
+                </p>
+                <Button
+                  onClick={claimAirdrop}
+                  className="bg-pink-500 hover:bg-pink-600 text-white mt-2"
+                >
+                  Claim Airdrop
+                </Button>
+              </>
+            ) : proofsData ? (
+              <p className="mt-4 text-red-700 font-semibold">Not eligible</p>
+            ) : null}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Contract info cards */}
+      <div className="mt-6 grid gap-4 grid-cols-1 md:grid-cols-3 w-full max-w-4xl">
+        <Card className="shadow-md">
+          <CardContent className="p-4">
+            <h2 className="text-xl font-semibold">Token</h2>
+            <p>Name: WeLove</p>
+            <p>Symbol: WELO</p>
+            <p>Address: {TOKEN_ADDRESS}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-md">
+          <CardContent className="p-4">
+            <h2 className="text-xl font-semibold">Airdrop</h2>
+            <p>Address: {AIRDROP_ADDRESS}</p>
+            {eligibleInfo && <p>Claimable: {eligibleInfo.amount} {tokenSymbol}</p>}
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-md">
+          <CardContent className="p-4">
+            <h2 className="text-xl font-semibold">Deployer</h2>
+            <p>Address: {DEPLOYER_ADDRESS}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Whitelist Table with Pagination */}
+      {eligibleInfo && proofsData && (
+        <div className="mt-10 w-full max-w-4xl">
+          <h2 className="text-2xl font-semibold mb-4">Whitelist Preview</h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Address</TableHead>
+                <TableHead>Amount</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {paginatedEntries.map(([addr, info]) => (
+                <TableRow key={addr}>
+                  <TableCell>{addr}</TableCell>
+                  <TableCell>{info.amount}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          {/* Pagination Controls */}
+          <div className="flex justify-center mt-4 gap-4">
+            <Button
+              variant="outline"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => p - 1)}
+            >
+              Prev
+            </Button>
+            <span className="self-center">Page {currentPage} of {totalPages}</span>
+            <Button
+              variant="outline"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => p + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
